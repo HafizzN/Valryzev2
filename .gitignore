@@ -48,3 +48,6 @@ Thumbs.db
 
 # Portal mobile old
 /portal_mobile
+
+# Ignore backend git repo
+/backend/.git
