@@ -1,4 +1,5 @@
 *.log
+*.apk
 .DS_Store
 .env
 .env.backup
@@ -22,3 +23,27 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Flutter
+/mobile/.dart_tool
+/mobile/.flutter-plugins
+/mobile/.flutter-plugins-dependencies
+/mobile/.metadata
+/mobile/.packages
+/mobile/build
+/mobile/android/.gradle
+/mobile/android/app/build
+/mobile/ios/Pods
+/mobile/ios/.symlinks
+/mobile/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata
+/mobile/ios/Runner.xcodeproj/project.xcworkspace/xcuserdata
+/mobile/ios/Runner.xcworkspace/xcshareddata
+/mobile/ios/Runner.xcworkspace/xcuserdata
+/mobile/ios/Flutter/flutter_export_environment.sh
+/mobile/app-release.apk
+/mobile/portal_mobile
+
+# React
+/frontend-react/node_modules
+/frontend-react/build
+
