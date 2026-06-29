@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "667129882205",
+    "project_id": "valryze-c07e7",
+    "storage_bucket": "valryze-c07e7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:667129882205:android:58fe10d85257b346280fb4",
+        "android_client_info": {
+          "package_name": "com.valryse.hris"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJBBIblx5GOkx9cRCm_LrGgVhzQhynax4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
