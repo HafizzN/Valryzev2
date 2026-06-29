@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use App\Jobs\SendEmailJob;
+use App\Models\ActivityLog;
 
 class LeaveRequestController extends Controller
 {
@@ -68,7 +69,7 @@ class LeaveRequestController extends Controller
             $attachmentPath = $request->file('attachment')->store('leave-attachments', 'public');
         }
 
-        LeaveRequest::create([
+        $leaveRequest = LeaveRequest::create([
             'user_id'         => $user->id,
             'leave_type'      => $request->leave_type,
             'start_date'      => $request->start_date,
@@ -80,6 +81,16 @@ class LeaveRequestController extends Controller
             'child_birth_date'=> $request->child_birth_date,
             'wedding_date'    => $request->wedding_date,
             'status'          => 'pending',
+        ]);
+
+        ActivityLog::log('create', 'LeaveRequest', $leaveRequest->id, [
+            'user_id' => $user->id,
+            'user_name' => $user->name,
+            'leave_type' => $request->leave_type,
+            'start_date' => $request->start_date,
+            'end_date' => $request->end_date,
+            'total_days' => $totalDays,
+            'reason' => $request->reason,
         ]);
 
         return redirect()->route('leave.index')->with('success', 'Pengajuan cuti berhasil dikirim.');
@@ -100,6 +111,14 @@ class LeaveRequestController extends Controller
                 'status'             => 'approved_manager',
                 'approved_by_manager'=> $user->id,
                 'manager_approved_at'=> now(),
+            ]);
+
+            ActivityLog::log('update', 'LeaveRequest', $leave->id, [
+                'user_id' => $leave->user_id,
+                'user_name' => $leave->user->name,
+                'leave_type' => $leave->leave_type,
+                'status' => 'approved_manager',
+                'approved_by' => $user->name,
             ]);
 
             try {
@@ -125,6 +144,14 @@ class LeaveRequestController extends Controller
                 'status'          => 'approved',
                 'approved_by_hrd' => $user->id,
                 'hrd_approved_at' => now(),
+            ]);
+
+            ActivityLog::log('update', 'LeaveRequest', $leave->id, [
+                'user_id' => $leave->user_id,
+                'user_name' => $leave->user->name,
+                'leave_type' => $leave->leave_type,
+                'status' => 'approved',
+                'approved_by' => $user->name,
             ]);
 
             // Auto-generate attendance records for all approved leave dates
@@ -171,6 +198,15 @@ class LeaveRequestController extends Controller
         $leave->update([
             'status'           => 'rejected',
             'rejection_reason' => $request->rejection_reason,
+        ]);
+
+        ActivityLog::log('update', 'LeaveRequest', $leave->id, [
+            'user_id' => $leave->user_id,
+            'user_name' => $leave->user->name,
+            'leave_type' => $leave->leave_type,
+            'status' => 'rejected',
+            'rejection_reason' => $request->rejection_reason,
+            'rejected_by' => $user->name,
         ]);
 
         try {

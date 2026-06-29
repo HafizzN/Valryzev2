@@ -39,7 +39,7 @@ class AnnouncementController extends Controller
             $attachmentPath = $request->file('attachment')->store('announcements', 'public');
         }
 
-        Announcement::create([
+        $announcement = Announcement::create([
             'user_id'      => Auth::id(),
             'title'        => $request->title,
             'content'      => $request->content,
@@ -49,6 +49,24 @@ class AnnouncementController extends Controller
             'published_at' => $request->published_at ?? now(),
             'expired_at'   => $request->expired_at,
         ]);
+
+        // Broadcast notification to all active users
+        try {
+            $users = \App\Models\User::where('status', 'active')->get();
+            foreach ($users as $user) {
+                \App\Models\Notification::create([
+                    'user_id' => $user->id,
+                    'type'    => 'document', // Categorized as document/info type
+                    'title'   => '📢 Pengumuman Baru Perusahaan',
+                    'message' => 'Ada pengumuman resmi baru: "' . $request->title . '". Harap dibaca dan ditindaklanjuti.',
+                    'url'     => route('announcements.index'),
+                    'icon'    => 'campaign',
+                    'color'   => '#06B6D4', // VALRYZE Cyan
+                ]);
+            }
+        } catch (\Exception $e) {
+            // Silence broadcast errors to not block announcement creation
+        }
 
         return redirect()->route('announcements.index')->with('success', 'Pengumuman berhasil dibuat.');
     }
@@ -66,14 +84,20 @@ class AnnouncementController extends Controller
     public function update(Request $request, Announcement $announcement)
     {
         $request->validate([
-            'title'    => 'required|string|max:255',
-            'content'  => 'required|string',
-            'category' => 'required|in:info,meeting,holiday,activity,other',
+            'title'      => 'required|string|max:255',
+            'content'    => 'required|string',
+            'category'   => 'required|in:info,meeting,holiday,activity,other',
+            'attachment' => 'nullable|file|max:10240',
         ]);
 
-        $announcement->update($request->only([
-            'title', 'content', 'category', 'is_pinned', 'published_at', 'expired_at'
-        ]) + ['is_pinned' => $request->boolean('is_pinned')]);
+        $data = $request->only(['title', 'content', 'category', 'published_at', 'expired_at']);
+        $data['is_pinned'] = $request->boolean('is_pinned');
+
+        if ($request->hasFile('attachment')) {
+            $data['attachment'] = $request->file('attachment')->store('announcements', 'public');
+        }
+
+        $announcement->update($data);
 
         return redirect()->route('announcements.index')->with('success', 'Pengumuman berhasil diperbarui.');
     }

@@ -30,12 +30,15 @@ class ReportController extends Controller
             $query->where('user_id', $request->user_id);
         }
 
+        // Clone the query builder before applying sorting to prevent SQL Group By syntax errors
+        $summaryQuery = $query->clone();
+
         $attendances = $query->orderBy('date')->orderBy('user_id')->paginate(30);
         $users = User::where('status', 'active')->orderBy('name')->get();
         $divisions = \App\Models\Division::where('is_active', true)->get();
 
         // Summary stats optimized into a single database query
-        $summaryCounts = $query->clone()
+        $summaryCounts = $summaryQuery
             ->selectRaw("
                 COUNT(CASE WHEN status = 'present' THEN 1 END) as present,
                 COUNT(CASE WHEN status = 'late' THEN 1 END) as late,
@@ -61,20 +64,56 @@ class ReportController extends Controller
         $month = $request->get('month', now()->format('Y-m'));
         [$year, $monthNum] = explode('-', $month);
 
-        $attendances = Attendance::with(['user.division', 'user.position'])
-            ->whereYear('date', $year)
-            ->whereMonth('date', $monthNum)
-            ->orderBy('date')
-            ->get();
+        $query = Attendance::select('attendances.*')
+            ->leftJoin('users', 'attendances.user_id', '=', 'users.id')
+            ->leftJoin('divisions', 'users.division_id', '=', 'divisions.id')
+            ->addSelect([
+                'users.nik as user_nik',
+                'users.name as user_name',
+                'divisions.name as division_name'
+            ])
+            ->whereYear('attendances.date', $year)
+            ->whereMonth('attendances.date', $monthNum);
+
+        if ($request->filled('division_id')) {
+            $query->where('users.division_id', $request->division_id);
+        }
+        if ($request->filled('user_id')) {
+            $query->where('attendances.user_id', $request->user_id);
+        }
 
         if ($request->get('format') === 'pdf') {
+            ini_set('memory_limit', '2G');
+            // Optimize PDF with a single joined query instead of eager loading
+            $pdfQuery = Attendance::select('attendances.*')
+                ->leftJoin('users', 'attendances.user_id', '=', 'users.id')
+                ->leftJoin('divisions', 'users.division_id', '=', 'divisions.id')
+                ->leftJoin('positions', 'users.position_id', '=', 'positions.id')
+                ->addSelect([
+                    'users.nik as user_nik',
+                    'users.name as user_name',
+                    'divisions.name as division_name',
+                    'positions.name as position_name',
+                ])
+                ->whereYear('attendances.date', $year)
+                ->whereMonth('attendances.date', $monthNum);
+
+            if ($request->filled('division_id')) {
+                $pdfQuery->where('users.division_id', $request->division_id);
+            }
+            if ($request->filled('user_id')) {
+                $pdfQuery->where('attendances.user_id', $request->user_id);
+            }
+
+            $attendances = $pdfQuery->orderBy('attendances.date')->orderBy('attendances.user_id')->get();
+
             $pdf = Pdf::loadView('reports.attendance-pdf', compact('attendances', 'month'))
                 ->setPaper('a4', 'landscape');
             return $pdf->download("laporan-kehadiran-{$month}.pdf");
         }
 
         return Excel::download(
-            new \App\Exports\AttendanceExport($attendances),
+            new \App\Exports\AttendanceReportExport($query),
             "laporan-kehadiran-{$month}.xlsx"
         );
     }

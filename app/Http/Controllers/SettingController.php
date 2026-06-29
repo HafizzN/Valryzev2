@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Company;
+use App\Models\ActivityLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -26,6 +27,7 @@ class SettingController extends Controller
         ]);
 
         $company = Company::firstOrCreate([]);
+        $oldData = $company->only(['name', 'address', 'phone', 'email', 'website', 'logo']);
         $data = $request->except(['logo', '_token', '_method']);
 
         if ($request->hasFile('logo')) {
@@ -34,12 +36,19 @@ class SettingController extends Controller
         }
 
         $company->update($data);
+        $newData = $company->only(['name', 'address', 'phone', 'email', 'website', 'logo']);
+
+        ActivityLog::log('update', 'Company', $company->id, [
+            'old' => $oldData,
+            'new' => $newData
+        ]);
+
         return redirect()->route('settings.company')->with('success', 'Profil perusahaan berhasil diperbarui.');
     }
 
     public function auditLogs(Request $request)
     {
-        $query = \App\Models\ActivityLog::with('user');
+        $query = ActivityLog::with('user');
 
         if ($request->filled('action')) {
             $query->where('action', $request->action);

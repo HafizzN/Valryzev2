@@ -76,7 +76,15 @@ Route::middleware(['auth'])->group(function () {
     Route::get('documents/{document}/download', [CompanyDocumentController::class, 'download'])->name('documents.download');
 
     // ─── Announcements (Pengumuman) ──────────────────────────────────────────
-    Route::resource('announcements', AnnouncementController::class);
+    Route::middleware(['role:super_admin|hrd|manager'])->group(function () {
+        Route::get('announcements/create', [\App\Http\Controllers\AnnouncementController::class, 'create'])->name('announcements.create');
+        Route::post('announcements', [\App\Http\Controllers\AnnouncementController::class, 'store'])->name('announcements.store');
+        Route::get('announcements/{announcement}/edit', [\App\Http\Controllers\AnnouncementController::class, 'edit'])->name('announcements.edit');
+        Route::put('announcements/{announcement}', [\App\Http\Controllers\AnnouncementController::class, 'update'])->name('announcements.update');
+        Route::delete('announcements/{announcement}', [\App\Http\Controllers\AnnouncementController::class, 'destroy'])->name('announcements.destroy');
+    });
+    Route::get('announcements', [\App\Http\Controllers\AnnouncementController::class, 'index'])->name('announcements.index');
+    Route::get('announcements/{announcement}', [\App\Http\Controllers\AnnouncementController::class, 'show'])->name('announcements.show');
 
     // ─── Employees (Karyawan) ────────────────────────────────────────────────
     Route::middleware(['role:super_admin|hrd'])->group(function () {
@@ -101,6 +109,13 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/gps', [ReportController::class, 'gps'])->name('gps');
     });
 
+    // ─── Payroll ─────────────────────────────────────────────────────────────
+    Route::middleware(['role:super_admin|hrd|manager'])->prefix('payroll')->name('payroll.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\PayrollController::class, 'index'])->name('index');
+        Route::get('/{id}/edit', [\App\Http\Controllers\PayrollController::class, 'edit'])->name('edit');
+        Route::put('/{id}', [\App\Http\Controllers\PayrollController::class, 'update'])->name('update');
+    });
+
     // ─── Settings ────────────────────────────────────────────────────────────
     Route::middleware(['role:super_admin'])->prefix('settings')->name('settings.')->group(function () {
         Route::get('/company', [SettingController::class, 'company'])->name('company');
@@ -122,4 +137,7 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/{notification}/read', [App\Http\Controllers\NotificationController::class, 'markRead'])->name('read');
         Route::post('/read-all', [App\Http\Controllers\NotificationController::class, 'markAllRead'])->name('read-all');
     });
+
+    // ─── Global Search API ───────────────────────────────────────────────────
+    Route::get('/global-search', [DashboardController::class, 'search'])->name('global-search');
 });

@@ -20,10 +20,11 @@ class User extends Authenticatable
         'birth_date', 'birth_place', 'religion', 'marital_status',
         'division_id', 'position_id', 'shift_id',
         'join_date', 'resign_date', 'employment_type', 'status',
-        'annual_leave_quota', 'annual_leave_used',
+        'annual_leave_quota', 'annual_leave_used', 'api_token', 'fcm_token',
+        'basic_salary', 'allowance', 'bpjs_deduction', 'tax_deduction',
     ];
 
-    protected $hidden = ['password', 'remember_token'];
+    protected $hidden = ['password', 'remember_token', 'api_token'];
 
     protected function casts(): array
     {
@@ -95,12 +96,14 @@ class User extends Authenticatable
         return max(0, $this->annual_leave_quota - $this->annual_leave_used);
     }
 
-    public function getPhotoUrlAttribute(): string
+    public function getPhotoUrlAttribute(): ?string
     {
         if ($this->photo) {
-            return asset('storage/' . $this->photo);
+            $baseUrl = request() ? request()->getSchemeAndHttpHost() : config('app.url');
+            $version = $this->updated_at ? $this->updated_at->timestamp : time();
+            return $baseUrl . '/api/photo/' . $this->id . '?v=' . $version;
         }
-        return asset('images/default-avatar.png');
+        return null;
     }
 
     public function getInitialsAttribute(): string

@@ -7,6 +7,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 
 class ProfileController extends Controller
@@ -34,22 +35,12 @@ class ProfileController extends Controller
         }
 
         if ($request->filled('cropped_photo')) {
-            $base64 = $request->cropped_photo;
-            $data = preg_replace('/^data:image\/\w+;base64,/', '', $base64);
-            $decoded = base64_decode($data);
-            $filename = 'employee-photos/' . \Illuminate\Support\Str::uuid() . '.jpg';
-
-            if ($user->photo) {
-                \Illuminate\Support\Facades\Storage::disk('public')->delete($user->photo);
-            }
-
-            \Illuminate\Support\Facades\Storage::disk('public')->put($filename, $decoded);
-            $user->photo = $filename;
+            $user->photo = $request->cropped_photo;
         } elseif ($request->hasFile('photo')) {
-            if ($user->photo) {
-                \Illuminate\Support\Facades\Storage::disk('public')->delete($user->photo);
-            }
-            $user->photo = $request->file('photo')->store('employee-photos', 'public');
+            $file = $request->file('photo');
+            $filename = time() . '_' . $user->id . '.' . $file->getClientOriginalExtension();
+            $file->storeAs('public/profiles', $filename);
+            $user->photo = 'profiles/' . $filename;
         }
 
         $user->save();

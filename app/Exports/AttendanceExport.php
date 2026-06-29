@@ -41,7 +41,10 @@ class AttendanceExport implements FromCollection, WithHeadings, WithStyles, With
     public function styles(Worksheet $sheet): array
     {
         return [
-            1 => ['font' => ['bold' => true], 'fill' => ['fillType' => 'solid', 'startColor' => ['rgb' => '1E3A5F']], 'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']]],
+            1 => [
+                'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+                'fill' => ['fillType' => 'solid', 'startColor' => ['rgb' => '1E3A5F']],
+            ],
         ];
     }
 

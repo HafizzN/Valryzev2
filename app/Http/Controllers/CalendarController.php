@@ -47,13 +47,20 @@ class CalendarController extends Controller
             ->whereYear('date', $year)
             ->whereMonth('date', $monthNum)
             ->get()
-            ->keyBy(fn($a) => $a->date->format('Y-m-d'));
+            ->groupBy(fn($a) => $a->date->format('Y-m-d'));
 
         // Fetch holidays for the selected month
         $holidays = Holiday::whereYear('date', $year)
             ->whereMonth('date', $monthNum)
             ->get()
             ->keyBy(fn($h) => $h->date->format('Y-m-d'));
+
+        // Fetch birthdays for the selected month
+        $birthdays = User::where('status', 'active')
+            ->whereNotNull('birth_date')
+            ->whereMonth('birth_date', $monthNum)
+            ->get()
+            ->groupBy(fn($u) => $u->birth_date->format('d'));
 
         // Fetch employees list for dropdown if authorized
         $employees = collect();
@@ -66,7 +73,7 @@ class CalendarController extends Controller
                 ->get();
         }
 
-        return view('calendar.index', compact('attendances', 'holidays', 'employees', 'selectedUser', 'month', 'canFilter'));
+        return view('calendar.index', compact('attendances', 'holidays', 'employees', 'selectedUser', 'month', 'canFilter', 'birthdays'));
     }
 
     /**
@@ -103,6 +110,7 @@ class CalendarController extends Controller
                     [
                         'status' => 'holiday',
                         'notes' => $request->name,
+                        'shift_id' => null,
                     ]
                 );
             }

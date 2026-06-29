@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\AttendanceExport;
+use App\Models\ActivityLog;
 
 class AttendanceController extends Controller
 {
@@ -26,7 +27,7 @@ class AttendanceController extends Controller
     private function getActiveAttendance($user)
     {
         return Attendance::where('user_id', $user->id)
-            ->whereIn('date', [Carbon::today(), Carbon::yesterday()])
+            ->whereIn('date', [Carbon::today('Asia/Jakarta'), Carbon::yesterday('Asia/Jakarta')])
             ->whereNull('check_out_time')
             ->first();
     }
@@ -42,19 +43,24 @@ class AttendanceController extends Controller
                 ->with('info', 'Anda sudah melakukan absen masuk untuk shift ' . ($activeAttendance->shift->name ?? '') . ' pukul ' . $activeAttendance->check_in_time . '. Silakan lakukan absen pulang.');
         }
 
-        // Check if they already completed their attendance today
-        $completedToday = Attendance::where('user_id', $user->id)
-            ->whereDate('date', Carbon::today())
+        // Find completed shifts today
+        $completedShiftIds = Attendance::where('user_id', $user->id)
+            ->whereDate('date', Carbon::today('Asia/Jakarta'))
             ->whereNotNull('check_out_time')
-            ->first();
-
-        if ($completedToday) {
-            return redirect()->route('attendance.history')
-                ->with('info', 'Anda sudah menyelesaikan absensi masuk dan pulang untuk hari ini.');
-        }
+            ->pluck('shift_id')
+            ->toArray();
 
         $officeLocations = OfficeLocation::where('is_active', true)->get();
-        $shifts = \App\Models\Shift::where('is_active', true)->get();
+        
+        // Only show active shifts that haven't been completed today
+        $shifts = \App\Models\Shift::where('is_active', true)
+            ->whereNotIn('id', $completedShiftIds)
+            ->get();
+
+        if ($shifts->isEmpty()) {
+            return redirect()->route('attendance.history')
+                ->with('info', 'Anda sudah menyelesaikan semua sesi absensi shift yang tersedia untuk hari ini.');
+        }
 
         return view('attendance.check-in', compact('officeLocations', 'shifts'));
     }
@@ -75,6 +81,7 @@ class AttendanceController extends Controller
         $lat       = (float) $request->latitude;
         $lng       = (float) $request->longitude;
         $accuracy  = (float) $request->accuracy;
+        $bypass    = $request->boolean('bypass_restrictions');
 
         // Block if already has an active session
         $activeAttendance = $this->getActiveAttendance($user);
@@ -83,29 +90,19 @@ class AttendanceController extends Controller
                 ->with('error', 'Anda sudah melakukan absen masuk dan harus melakukan absen pulang terlebih dahulu.');
         }
 
-        // Block if already completed attendance today
-        $completedToday = Attendance::where('user_id', $user->id)
-            ->whereDate('date', Carbon::today())
-            ->whereNotNull('check_out_time')
-            ->first();
-        if ($completedToday) {
-            return redirect()->route('attendance.history')
-                ->with('info', 'Anda sudah menyelesaikan absensi masuk dan pulang untuk hari ini.');
-        }
-
         // Fetch selected shift
         $shift = \App\Models\Shift::findOrFail($request->shift_id);
 
         // Resolve active shift session
-        $sessionTodayStart = Carbon::today()->setTimeFromTimeString($shift->start_time);
-        $sessionTodayEnd = Carbon::today()->setTimeFromTimeString($shift->end_time);
+        $sessionTodayStart = Carbon::today('Asia/Jakarta')->setTimeFromTimeString($shift->start_time);
+        $sessionTodayEnd = Carbon::today('Asia/Jakarta')->setTimeFromTimeString($shift->end_time);
         if ($shift->is_overnight) {
             $sessionTodayEnd->addDay();
         }
         $sessionTodayEarliest = $sessionTodayStart->copy()->subMinutes(60);
 
-        $sessionYesterdayStart = Carbon::yesterday()->setTimeFromTimeString($shift->start_time);
-        $sessionYesterdayEnd = Carbon::yesterday()->setTimeFromTimeString($shift->end_time);
+        $sessionYesterdayStart = Carbon::yesterday('Asia/Jakarta')->setTimeFromTimeString($shift->start_time);
+        $sessionYesterdayEnd = Carbon::yesterday('Asia/Jakarta')->setTimeFromTimeString($shift->end_time);
         if ($shift->is_overnight) {
             $sessionYesterdayEnd->addDay();
         }
@@ -128,15 +125,34 @@ class AttendanceController extends Controller
         }
 
         if (!$selectedSession) {
-            return back()->with('error', '❌ Absen masuk ditolak. Anda berada di luar jam absensi untuk shift ' . $shift->name . ' (Waktu absensi dibuka mulai dari 60 menit sebelum shift dimulai hingga shift berakhir).');
+            if ($bypass) {
+                $selectedSession = [
+                    'date' => Carbon::today('Asia/Jakarta'),
+                    'start' => $sessionTodayStart,
+                    'end' => $sessionTodayEnd,
+                ];
+            } else {
+                return back()->with('error', '❌ Absen masuk ditolak. Anda berada di luar jam absensi untuk shift ' . $shift->name . ' (Waktu absensi dibuka mulai dari 60 menit sebelum shift dimulai hingga shift berakhir).');
+            }
         }
 
         $sessionDate = $selectedSession['date'];
         $scheduledStart = $selectedSession['start'];
 
+        // Block if already completed this specific shift for the resolved session date
+        $completedThisShift = Attendance::where('user_id', $user->id)
+            ->where('shift_id', $shift->id)
+            ->where('date', $sessionDate)
+            ->whereNotNull('check_out_time')
+            ->first();
+        if ($completedThisShift) {
+            return redirect()->route('attendance.history')
+                ->with('info', 'Anda sudah menyelesaikan absensi untuk shift ' . $shift->name . ' pada tanggal ' . $sessionDate->format('d/m/Y') . '.');
+        }
+
         // Fake GPS detection
         $isFakeGps = $this->geoFencing->detectFakeGps($lat, $lng, $accuracy);
-        if ($isFakeGps) {
+        if ($isFakeGps && !$bypass) {
             return back()->with('error', '⚠️ Terdeteksi penggunaan GPS palsu (Fake GPS). Absensi ditolak!');
         }
 
@@ -147,7 +163,7 @@ class AttendanceController extends Controller
             return back()->with('error', 'Tidak ada lokasi kantor yang terdaftar. Hubungi Admin.');
         }
 
-        if (!$geoResult['within_radius']) {
+        if (!$geoResult['within_radius'] && !$bypass) {
             $distance = $geoResult['distance'];
             $radius   = $geoResult['office']->radius_meters;
             return back()->with('error', "❌ Lokasi Anda terlalu jauh dari kantor. Jarak: {$distance}m, Radius diizinkan: {$radius}m");
@@ -181,12 +197,11 @@ class AttendanceController extends Controller
             $lateMinutes = $now->diffInMinutes($scheduledStart);
         }
 
-        // Create or update attendance record for the resolved session date
+        // Create or update attendance record for the resolved session date and shift_id
         $attendance = Attendance::updateOrCreate(
-            ['user_id' => $user->id, 'date' => $sessionDate],
+            ['user_id' => $user->id, 'date' => $sessionDate, 'shift_id' => $shift->id],
             [
                 'office_location_id'   => $geoResult['office']->id,
-                'shift_id'             => $shift->id,
                 'check_in_time'        => $now->format('H:i:s'),
                 'check_in_photo'       => $finalPhotoPath,
                 'check_in_latitude'    => $lat,
@@ -198,6 +213,15 @@ class AttendanceController extends Controller
                 'late_minutes'         => $lateMinutes,
             ]
         );
+
+        ActivityLog::log('create', 'Attendance', $attendance->id, [
+            'user_id' => $user->id,
+            'user_name' => $user->name,
+            'date' => $sessionDate->format('Y-m-d'),
+            'check_in_time' => $now->format('H:i:s'),
+            'status' => $status,
+            'late_minutes' => $lateMinutes,
+        ]);
 
         $message = $status === 'late'
             ? "⚠️ Absen masuk berhasil, namun Anda terlambat {$lateMinutes} menit."
@@ -213,17 +237,6 @@ class AttendanceController extends Controller
         $attendance = $this->getActiveAttendance($user);
 
         if (!$attendance || !$attendance->check_in_time) {
-            // Check if they already completed their attendance today
-            $completedToday = Attendance::where('user_id', $user->id)
-                ->whereDate('date', Carbon::today())
-                ->whereNotNull('check_out_time')
-                ->first();
-
-            if ($completedToday) {
-                return redirect()->route('attendance.history')
-                    ->with('info', 'Anda sudah melakukan absen pulang hari ini.');
-            }
-
             return redirect()->route('attendance.check-in')
                 ->with('error', 'Anda belum melakukan absen masuk.');
         }
@@ -245,6 +258,7 @@ class AttendanceController extends Controller
         $user  = Auth::user();
         $lat   = (float) $request->latitude;
         $lng   = (float) $request->longitude;
+        $bypass = $request->boolean('bypass_restrictions');
 
         $attendance = $this->getActiveAttendance($user);
         if (!$attendance) {
@@ -253,12 +267,12 @@ class AttendanceController extends Controller
         }
 
         $isFakeGps = $this->geoFencing->detectFakeGps($lat, $lng, (float) $request->accuracy);
-        if ($isFakeGps) {
+        if ($isFakeGps && !$bypass) {
             return back()->with('error', '⚠️ Terdeteksi GPS palsu. Absen pulang ditolak!');
         }
 
         $geoResult = $this->geoFencing->validateAgainstOffices($lat, $lng);
-        if (!$geoResult || !$geoResult['within_radius']) {
+        if ((!$geoResult || !$geoResult['within_radius']) && !$bypass) {
             $distance = $geoResult['distance'] ?? 'N/A';
             return back()->with('error', "❌ Lokasi tidak valid. Jarak dari kantor: {$distance}m");
         }
@@ -266,12 +280,13 @@ class AttendanceController extends Controller
         $photoPath = $this->saveBase64Photo($request->photo, 'attendance/check-out');
         $now = $this->getSecureTime();
 
+        $watermarkDistance = $geoResult ? $geoResult['distance'] : 0;
         $watermarkData = $this->watermark->buildAttendanceWatermarkData(
             $user->name,
             $now->format('d/m/Y'),
             $now->format('H:i:s'),
             $lat, $lng,
-            $geoResult['distance']
+            $watermarkDistance
         );
 
         $fullPath = Storage::disk('public')->path($photoPath);
@@ -295,9 +310,14 @@ class AttendanceController extends Controller
             $tolerance = $shift->early_out_tolerance_minutes ?? 0;
             $threshold = $shiftEndDatetime->copy()->subMinutes($tolerance);
 
-            if ($now->lt($threshold)) {
+            if ($now->lt($threshold) && !$bypass) {
                 $earliestAllowedCheckOut = $threshold->format('H:i');
                 return back()->with('error', "❌ Absen pulang ditolak. Anda tidak diperbolehkan melakukan absen pulang sebelum waktu shift berakhir. Absen pulang untuk shift " . $shift->name . " paling awal dibuka pukul " . $earliestAllowedCheckOut . " WIB.");
+            }
+
+            $maxCheckOutTime = $shiftEndDatetime->copy()->addHours(6);
+            if ($now->gt($maxCheckOutTime) && !$bypass) {
+                return back()->with('error', "❌ Absen pulang ditolak. Batas waktu absen pulang (maksimal 6 jam setelah shift berakhir) telah terlewati. Silakan hubungi HRD.");
             }
 
             // Calculate early out minutes if checking out before scheduled shift end
@@ -317,6 +337,14 @@ class AttendanceController extends Controller
             'check_out_address'  => $request->address ?? '',
             'check_out_distance' => $geoResult['distance'],
             'early_out_minutes'  => $earlyOutMinutes,
+        ]);
+
+        ActivityLog::log('update', 'Attendance', $attendance->id, [
+            'user_id' => $user->id,
+            'user_name' => $user->name,
+            'date' => $attendance->date,
+            'check_out_time' => $now->format('H:i:s'),
+            'early_out_minutes' => $earlyOutMinutes,
         ]);
 
         $message = '✅ Absen pulang berhasil! Sampai jumpa besok.';
@@ -359,7 +387,39 @@ class AttendanceController extends Controller
         }
 
         if ($request->get('export') === 'pdf') {
-            $exportData = $query->orderBy('date', 'desc')->get();
+            ini_set('memory_limit', '2G');
+            // Re-build the query with joins for more efficient PDF export
+            $pdfQuery = Attendance::select('attendances.*')
+                ->leftJoin('users', 'attendances.user_id', '=', 'users.id')
+                ->leftJoin('divisions', 'users.division_id', '=', 'divisions.id')
+                ->leftJoin('positions', 'users.position_id', '=', 'positions.id')
+                ->addSelect([
+                    'users.nik as user_nik',
+                    'users.name as user_name',
+                    'divisions.name as division_name',
+                    'positions.name as position_name',
+                ]);
+
+            if ($request->filled('user_id') && $user->hasRole(['super_admin', 'hrd'])) {
+                $pdfQuery->where('attendances.user_id', $request->user_id);
+            }
+            if (!$user->hasRole(['super_admin', 'hrd', 'manager'])) {
+                $pdfQuery->where('attendances.user_id', $user->id);
+            }
+            
+            if ($request->filled('month')) {
+                [$year, $monthNum] = explode('-', $request->month);
+                $pdfQuery->whereYear('attendances.date', $year)->whereMonth('attendances.date', $monthNum);
+            } else {
+                $pdfQuery->whereMonth('attendances.date', now()->month)->whereYear('attendances.date', now()->year);
+            }
+            
+            if ($request->filled('status')) {
+                $pdfQuery->where('attendances.status', $request->status);
+            }
+
+            $exportData = $pdfQuery->orderBy('attendances.date', 'desc')->get();
+            
             $pdf = Pdf::loadView('reports.attendance-pdf', [
                 'attendances' => $exportData,
                 'month'       => $monthStr
@@ -367,13 +427,22 @@ class AttendanceController extends Controller
             return $pdf->download("riwayat-absensi-" . now()->format('Y-m-d') . ".pdf");
         }
 
+        // Calculate summary stats from full dataset (not paginated)
+        $totalPresent = (clone $query)->whereIn('status', ['present', 'late'])->count();
+        $totalLate = (clone $query)->where('status', 'late')->count();
+        $totalAbsent = (clone $query)->where('status', 'absent')->count();
+        $totalLeave = (clone $query)->whereIn('status', ['leave', 'permission'])->count();
+
         $attendances = $query->orderBy('date', 'desc')->paginate(20);
 
         $users = $user->hasRole(['super_admin', 'hrd'])
             ? \App\Models\User::where('status', 'active')->orderBy('name')->get()
             : collect();
 
-        return view('attendance.history', compact('attendances', 'users'));
+        return view('attendance.history', compact(
+            'attendances', 'users',
+            'totalPresent', 'totalLate', 'totalAbsent', 'totalLeave'
+        ));
     }
 
     /** Get secure time from public API with fallback to server time */

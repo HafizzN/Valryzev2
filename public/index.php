@@ -1,5 +1,9 @@
 <?php
 
+// Increase memory limit for large PDF/Excel exports
+ini_set('memory_limit', '2G');
+set_time_limit(300); // Allow up to 5 minutes for large exports
+
 use Illuminate\Foundation\Application;
 use Illuminate\Http\Request;
 
